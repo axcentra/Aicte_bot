@@ -2,17 +2,22 @@ name: AICTE Auto Bot
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    # Backup trigger: Agar kabhi kuch ruke toh har 5 min mein check karega
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
+# Ek time par ek hi shift chalegi taaki 2 bot aapas mein na takrayein
 concurrency:
-  group: aicte-auto-bot
+  group: aicte-infinite-bot
   cancel-in-progress: false
 
 jobs:
   automate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
+    permissions:
+      actions: write
+      contents: read
     steps:
       - name: Code Checkout
         uses: actions/checkout@v4
@@ -28,10 +33,18 @@ jobs:
           playwright install chromium
           playwright install-deps chromium
 
-      - name: Run AICTE Bot
+      - name: Run AICTE Bot (5.5 Hours Non-Stop Shift)
         env:
           AICTE_COOKIES: ${{ secrets.AICTE_COOKIES }}
           AICTE_TOKEN: ${{ secrets.AICTE_TOKEN }}
           AICTE_EMAIL: ${{ secrets.AICTE_EMAIL }}
           AICTE_PASSWORD: ${{ secrets.AICTE_PASSWORD }}
         run: python bot.py
+
+      - name: Instant Auto-Restart Next Shift
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Pehli shift khatam! Turant agli non-stop shift chalu kar raha hu..."
+          gh workflow run "AICTE Auto Bot" || true
