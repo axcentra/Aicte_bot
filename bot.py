@@ -24,13 +24,14 @@ Click on "Apply Now" and choose your preferred internship pathway to secure your
 
 Please complete your application process as soon as possible so we can generate your onboarding credentials."""
 
+
 def get_tomorrow_date():
     ist = timezone(timedelta(hours=5, minutes=30))
     tomorrow = datetime.now(ist) + timedelta(days=1)
     return tomorrow.strftime("%Y-%m-%d")
 
+
 def build_storage_script(raw_data):
-    """Sirf tabhi purana token dalega jab browser ke paas naya token na ho"""
     if not raw_data:
         return ""
     try:
@@ -62,8 +63,28 @@ def build_storage_script(raw_data):
         }} catch (e) {{}}
     """
 
+
+def close_open_modal(page):
+    try:
+        modal_backdrop = page.locator("div.fixed.inset-0")
+        if modal_backdrop.count() == 0:
+            return
+        if not modal_backdrop.first.is_visible():
+            return
+        cancel_btn = page.get_by_role("button", name="Cancel", exact=True).first
+        if cancel_btn.count() > 0 and cancel_btn.is_visible():
+            cancel_btn.click(timeout=2000)
+        else:
+            page.keyboard.press("Escape")
+        time.sleep(0.8)
+        if modal_backdrop.first.is_visible():
+            page.locator("div.fixed.inset-0 button").first.click(timeout=2000)
+            time.sleep(0.8)
+    except Exception:
+        pass
+
+
 def auto_login_renew_session(page):
-    """Jab 15-min wala Token expire ho jaye, toh khud Login karke naya Token banata hai"""
     print(">> Token expire ho gaya hai! Auto-Login se naya session bana raha hu...", flush=True)
     if not EMAIL or not PASSWORD:
         print("ERROR: AICTE_EMAIL ya AICTE_PASSWORD GitHub Secret mein nahi mila!", flush=True)
@@ -83,7 +104,6 @@ def auto_login_renew_session(page):
         pass_box.fill(PASSWORD)
         time.sleep(0.5)
 
-        # Solid (fillText) + Hollow Outline (strokeText) dono se exact 6 akshar nikalna
         captcha_code = page.evaluate("() => (window.__captcha_items || []).map(x => x.c).join('')")
         captcha_code = re.sub(r"[^A-Za-z0-9]", "", captcha_code)[-6:]
         print(f"Captcha Read: '{captcha_code}'", flush=True)
@@ -93,7 +113,6 @@ def auto_login_renew_session(page):
             captcha_input.fill(captcha_code)
         time.sleep(0.5)
 
-        # Agar button disabled ho toh enable karke click karna
         page.evaluate("""() => {
             const btn = document.querySelector("button[type='submit']");
             if (btn) btn.removeAttribute('disabled');
@@ -121,8 +140,245 @@ def auto_login_renew_session(page):
 
     return False
 
-def close_open_modal(page):
+
+def ensure_interview_management(page):
+    close_open_modal(page)
+
+    if "auth/login" in page.url:
+        if not auto_login_renew_session(page):
+            raise Exception("Auto-Login fail hua")
+
+    pending_tab = page.get_by_text("Pending Applications").first
+    if not pending_tab.is_visible():
+        try:
+            page.get_by_text("Interview Management").first.click(timeout=10000)
+            pending_tab.wait_for(state="visible", timeout=10000)
+            time.sleep(1)
+        except Exception:
+            page.goto("https://internship.aicte-india.org/employer/dashboard", timeout=60000)
+            time.sleep(3)
+            if "auth/login" in page.url or not page.get_by_text("Interview Management").first.is_visible():
+                if not auto_login_renew_session(page):
+                    raise Exception("Session renew nahi ho paya")
+            page.get_by_text("Interview Management").first.click(timeout=15000)
+            pending_tab.wait_for(state="visible", timeout=15000)
+            time.sleep(1)
+
+
+def set_max_rows_per_page(page):
     try:
-        modal_backdrop = page.locator("div.fixed.inset-0")
-        if modal_backdrop.count() > 0 and modal_backdrop.first.is_visible():
-            cancel_btn = page.get_by_role("button", name="Cancel", exact=True).first
+        selects = page.locator("select")
+        if selects.count() >= 2:
+            row_select = selects.nth(1)
+            options = row_select.locator("option").all_inner_texts()
+            for val in ["100", "50", "25"]:
+                if val in [o.strip() for o in options]:
+                    row_select.select_option(label=val)
+                    time.sleep(1)
+                    break
+    except Exception:
+        pass
+
+
+def process_all_students(page, iso_date):
+    ensure_interview_management(page)
+
+    print(">> Pending Applications check kar raha hu...", flush=True)
+    page.get_by_text("Pending Applications").first.click(timeout=15000)
+    time.sleep(1)
+    set_max_rows_per_page(page)
+
+    shortlisted_count = 0
+    skip_shortlist_idx = 0
+    empty_checks = 0
+
+    while True:
+        close_open_modal(page)
+        shortlist_btns = page.get_by_role("button", name="Shortlist", exact=True)
+        count = shortlist_btns.count()
+
+        if count <= skip_shortlist_idx:
+            empty_checks += 1
+            if empty_checks >= 2:
+                print(f"Pending check done! Total {shortlisted_count} shortlisted (Skipped stuck: {skip_shortlist_idx}).", flush=True)
+                break
+            time.sleep(1)
+            page.get_by_text("Pending Applications").first.click(timeout=15000)
+            time.sleep(1)
+            continue
+
+        empty_checks = 0
+        try:
+            prev_count = count
+            shortlist_btns.nth(skip_shortlist_idx).click(timeout=5000)
+            time.sleep(0.7)
+
+            new_count = page.get_by_role("button", name="Shortlist", exact=True).count()
+            if new_count < prev_count:
+                shortlisted_count += 1
+                print(f"[SUCCESS] Student #{shortlisted_count} Shortlisted!", flush=True)
+            else:
+                print(f"[SKIP] Pending Student #{skip_shortlist_idx + 1} respond nahi kar raha, skip kar raha hu...", flush=True)
+                skip_shortlist_idx += 1
+        except Exception:
+            skip_shortlist_idx += 1
+            time.sleep(1)
+
+    print(">> Shortlisted Applicants tab khol raha hu...", flush=True)
+    close_open_modal(page)
+    page.get_by_text("Shortlisted Applicants").first.click(timeout=15000)
+    time.sleep(1)
+    set_max_rows_per_page(page)
+
+    called_count = 0
+    skip_call_idx = 0
+    empty_call_checks = 0
+
+    while True:
+        close_open_modal(page)
+        call_btns = page.get_by_role("button", name="Call for Interview", exact=True)
+        count = call_btns.count()
+
+        if count <= skip_call_idx:
+            empty_call_checks += 1
+            if empty_call_checks >= 2:
+                print(f"Shortlisted tab done! Total {called_count} calls sent (Skipped stuck: {skip_call_idx}).", flush=True)
+                break
+            time.sleep(1)
+            page.get_by_text("Shortlisted Applicants").first.click(timeout=15000)
+            time.sleep(1)
+            continue
+
+        empty_call_checks = 0
+        try:
+            call_btns.nth(skip_call_idx).click(timeout=5000)
+
+            url_input = page.locator("input[placeholder*='meet.google.com' i]").first
+            url_input.wait_for(state="visible", timeout=5000)
+
+            try:
+                date_input = page.locator("input[type='date']").first
+                if date_input.count() > 0 and date_input.is_visible():
+                    date_input.fill(iso_date)
+                else:
+                    alt_date = page.locator("text=DATE OF INTERVIEW").locator("..").locator("input").first
+                    alt_date.fill(iso_date)
+            except Exception:
+                pass
+
+            page.locator("input[placeholder*='Resume' i]").first.fill(DOCUMENTS_REQ)
+            url_input.fill(MEETING_URL)
+            page.locator("textarea[placeholder*='Anything the candidate' i], textarea").first.fill(INTERVIEW_REMARKS)
+            time.sleep(0.3)
+
+            send_btn = page.get_by_role("button", name="Send Interview Call & Link", exact=True).first
+            send_btn.click(timeout=5000)
+
+            try:
+                send_btn.wait_for(state="hidden", timeout=6000)
+                called_count += 1
+                print(f"[SUCCESS] Student #{called_count} ko Interview Call bhej diya!", flush=True)
+                time.sleep(0.4)
+            except Exception:
+                print(f"[SKIP] Student #{skip_call_idx + 1} ka form submit nahi ho raha, skip kar raha hu...", flush=True)
+                close_open_modal(page)
+                skip_call_idx += 1
+
+        except Exception as e:
+            print("Modal skip:", e, flush=True)
+            close_open_modal(page)
+            skip_call_idx += 1
+            time.sleep(1)
+
+    return shortlisted_count, called_count
+
+
+def run_bot():
+    print("--- AICTE 24/7 TURBO RADAR BOT START (30s INSTANT CHECK) ---", flush=True)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1440, "height": 900})
+
+        context.add_init_script("""
+            window.__captcha_items = [];
+            window.__last_draw = 0;
+            function recordChar(text, type) {
+                const t = String(text || '').trim();
+                if (!/^[A-Za-z0-9]$/.test(t)) return;
+                const now = Date.now();
+                if (now - window.__last_draw > 50) {
+                    window.__captcha_items = [];
+                }
+                window.__last_draw = now;
+                const items = window.__captcha_items;
+                const last = items[items.length - 1];
+                if (last && last.c === t && !last[type]) {
+                    last[type] = true;
+                } else {
+                    const item = { c: t, fill: false, stroke: false };
+                    item[type] = true;
+                    items.push(item);
+                }
+            }
+            const origFill = CanvasRenderingContext2D.prototype.fillText;
+            CanvasRenderingContext2D.prototype.fillText = function(text, ...args) {
+                recordChar(text, 'fill');
+                return origFill.apply(this, [text, ...args]);
+            };
+            const origStroke = CanvasRenderingContext2D.prototype.strokeText;
+            CanvasRenderingContext2D.prototype.strokeText = function(text, ...args) {
+                recordChar(text, 'stroke');
+                return origStroke.apply(this, [text, ...args]);
+            };
+        """)
+
+        storage_script = build_storage_script(RAW_SECRET)
+        if storage_script:
+            context.add_init_script(storage_script)
+
+        page = context.new_page()
+
+        print("1. Employer Dashboard khol raha hu...", flush=True)
+        page.goto("https://internship.aicte-india.org/employer/dashboard", timeout=60000)
+
+        try:
+            page.get_by_text("Interview Management").first.wait_for(state="visible", timeout=12000)
+            print("SUCCESS: Token se seedha Dashboard khul gaya!", flush=True)
+        except Exception:
+            print("Initial Token expire ho chuka hai, Auto-Login se naya session bana raha hu...", flush=True)
+            if not auto_login_renew_session(page):
+                print("ERROR: Login nahi ho paya.", flush=True)
+                browser.close()
+                return
+
+        start_time = time.time()
+        cycle = 1
+        while (time.time() - start_time) < 330 * 60:
+            iso_date = get_tomorrow_date()
+            print(f"\n=== TURBO RADAR CYCLE #{cycle} (Interview Date: {iso_date}) ===", flush=True)
+
+            try:
+                process_all_students(page, iso_date)
+            except Exception as cycle_err:
+                print(f"Cycle #{cycle} recovery: {cycle_err}", flush=True)
+
+            print("Waiting 30 seconds for new students...", flush=True)
+            time.sleep(30)
+            cycle += 1
+
+            try:
+                close_open_modal(page)
+                page.get_by_text("Dashboard").first.click(timeout=10000)
+                time.sleep(1)
+                page.get_by_text("Interview Management").first.click(timeout=10000)
+                time.sleep(1.5)
+            except Exception:
+                pass
+
+        browser.close()
+        print("--- 5.5 HOUR SHIFT COMPLETE (AUTO-STARTING NEXT SHIFT NOW) ---", flush=True)
+
+
+if __name__ == "__main__":
+    run_bot()
