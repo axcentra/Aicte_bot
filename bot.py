@@ -180,6 +180,21 @@ def set_max_rows_per_page(page):
         pass
 
 
+def wait_15_mins_keep_alive(page):
+    """15 minute wait karega aur har 3 minute mein tab click karega taaki session expire na ho"""
+    print("Waiting 15 minutes for new students (Session Keep-Alive Active)...", flush=True)
+    for i in range(5):
+        time.sleep(180)
+        try:
+            close_open_modal(page)
+            if i % 2 == 0 and page.get_by_text("Pending Applications").first.is_visible():
+                page.get_by_text("Pending Applications").first.click(timeout=5000)
+            elif page.get_by_text("Shortlisted Applicants").first.is_visible():
+                page.get_by_text("Shortlisted Applicants").first.click(timeout=5000)
+        except Exception:
+            pass
+
+
 def process_all_students(page, iso_date):
     ensure_interview_management(page)
 
@@ -218,7 +233,7 @@ def process_all_students(page, iso_date):
                 shortlisted_count += 1
                 print(f"[SUCCESS] Student #{shortlisted_count} Shortlisted!", flush=True)
             else:
-                print(f"[SKIP] Pending Student #{skip_shortlist_idx + 1} respond nahi kar raha, skip kar raha hu...", flush=True)
+                print(f"[SKIP] Pending Student #{skip_shortlist_idx + 1} portal par stuck hai, skip kiya.", flush=True)
                 skip_shortlist_idx += 1
         except Exception:
             skip_shortlist_idx += 1
@@ -266,6 +281,14 @@ def process_all_students(page, iso_date):
             except Exception:
                 pass
 
+            try:
+                time_input = page.locator("input[type='time']").first
+                if time_input.count() > 0 and time_input.is_visible():
+                    if not time_input.input_value():
+                        time_input.fill("11:00")
+            except Exception:
+                pass
+
             page.locator("input[placeholder*='Resume' i]").first.fill(DOCUMENTS_REQ)
             url_input.fill(MEETING_URL)
             page.locator("textarea[placeholder*='Anything the candidate' i], textarea").first.fill(INTERVIEW_REMARKS)
@@ -280,12 +303,12 @@ def process_all_students(page, iso_date):
                 print(f"[SUCCESS] Student #{called_count} ko Interview Call bhej diya!", flush=True)
                 time.sleep(0.4)
             except Exception:
-                print(f"[SKIP] Student #{skip_call_idx + 1} ka form submit nahi ho raha, skip kar raha hu...", flush=True)
+                print(f"[SKIP] Student #{skip_call_idx + 1} portal par stuck hai, skip kar raha hu...", flush=True)
                 close_open_modal(page)
                 skip_call_idx += 1
 
-        except Exception as e:
-            print("Modal skip:", e, flush=True)
+        except Exception:
+            print(f"[SKIP] Student #{skip_call_idx + 1} ka button disabled/stuck hai, agle student par ja raha hu...", flush=True)
             close_open_modal(page)
             skip_call_idx += 1
             time.sleep(1)
@@ -294,7 +317,7 @@ def process_all_students(page, iso_date):
 
 
 def run_bot():
-    print("--- AICTE 24/7 TURBO RADAR BOT START (30s INSTANT CHECK) ---", flush=True)
+    print("--- AICTE 24/7 AUTO BOT START (15-MIN INTERVAL) ---", flush=True)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -356,15 +379,14 @@ def run_bot():
         cycle = 1
         while (time.time() - start_time) < 330 * 60:
             iso_date = get_tomorrow_date()
-            print(f"\n=== TURBO RADAR CYCLE #{cycle} (Interview Date: {iso_date}) ===", flush=True)
+            print(f"\n=== AUTO-CHECK CYCLE #{cycle} (Interview Date: {iso_date}) ===", flush=True)
 
             try:
                 process_all_students(page, iso_date)
             except Exception as cycle_err:
                 print(f"Cycle #{cycle} recovery: {cycle_err}", flush=True)
 
-            print("Waiting 30 seconds for new students...", flush=True)
-            time.sleep(30)
+            wait_15_mins_keep_alive(page)
             cycle += 1
 
             try:
