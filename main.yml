@@ -1,0 +1,37 @@
+name: AICTE Auto Bot
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: aicte-auto-bot
+  cancel-in-progress: false
+
+jobs:
+  automate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run AICTE Bot
+        env:
+          AICTE_COOKIES: ${{ secrets.AICTE_COOKIES }}
+          AICTE_TOKEN: ${{ secrets.AICTE_TOKEN }}
+          AICTE_EMAIL: ${{ secrets.AICTE_EMAIL }}
+          AICTE_PASSWORD: ${{ secrets.AICTE_PASSWORD }}
+        run: python bot.py
